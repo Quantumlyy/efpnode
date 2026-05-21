@@ -16,7 +16,10 @@
     "./handlers/ponder-store": "./src/handlers/ponder-store.ts",
     "./handlers/store": "./src/handlers/store.ts",
     "./lib/parse-list-op": "./src/lib/parse-list-op.ts",
-    "./lib/parse-list-storage-location": "./src/lib/parse-list-storage-location.ts"
+    "./lib/parse-list-storage-location": "./src/lib/parse-list-storage-location.ts",
+    "./lib/offline-slot": "./src/lib/offline-slot.ts",
+    "./offline/payload": "./src/offline/payload.ts",
+    "./offline/syncer": "./src/offline/syncer.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

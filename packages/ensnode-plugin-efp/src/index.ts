@@ -50,6 +50,23 @@ export {
 export * as efpSchema from "./schema.js";
 
 export {
+  parseOfflinePayload,
+  offlineRecordToWireFormat,
+  PayloadValidationError,
+  MAX_PAYLOAD_BYTES,
+  type OfflineListPayload,
+  type OfflineRecord,
+  type OfflineMetadata,
+} from "./offline/payload.js";
+
+export {
+  OfflineListSyncer,
+  type OfflineListSyncerOptions,
+  type SyncOutcome,
+  type SyncerEvent,
+} from "./offline/syncer.js";
+
+export {
   handleTransfer,
   handleUpdateListStorageLocation,
 } from "./handlers/ListRegistry.js";

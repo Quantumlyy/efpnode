@@ -113,21 +113,10 @@ export default createPlugin({
 });
 
 /**
- * Ponder uses the ENS namespace string keys returned by `chainsConnectionConfig`
- * for its `chain` map. We need to mirror them here without re-implementing the
- * full mapping; ENSIndexer's `chainsConnectionConfig` keys chains by their
- * viem chain `name` (e.g. "mainnet", "base", "optimism"). We use the short
- * form that's stable across viem versions.
+ * `chainsConnectionConfig` keys ponder chains by stringified chain id (see
+ * `apps/ensindexer/src/lib/ponder-helpers.ts` in ENSIndexer). We mirror that
+ * here so the `chain` map on each contract entry references the correct key.
  */
 function chainKey(chainId: number): string {
-  switch (chainId) {
-    case 1:
-      return "mainnet";
-    case 10:
-      return "optimism";
-    case 8453:
-      return "base";
-    default:
-      throw new Error(`[ensnode-plugin-efp] Unsupported chain id ${chainId}`);
-  }
+  return chainId.toString();
 }

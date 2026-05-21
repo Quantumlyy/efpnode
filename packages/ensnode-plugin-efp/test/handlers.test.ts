@@ -149,6 +149,28 @@ describe("ListRegistry handlers", () => {
     expect(row.list_storage_location).toBeUndefined();
   });
 
+  it("UpdateListStorageLocation ignores onchain chain ids that exceed safe integer range", async () => {
+    const store = new MemoryEFPStore();
+    await handleTransfer(store, {
+      args: { from: ADDR("00"), to: ADDR("aa"), tokenId: 1n },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS,
+    });
+
+    const unsafeChainId = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+    const slot = ("0x" + "cd".repeat(32)) as `0x${string}`;
+    await handleUpdateListStorageLocation(store, {
+      args: {
+        tokenId: 1n,
+        listStorageLocation: lslPayload(unsafeChainId, LIST_RECORDS_BASE, slot),
+      },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS + 1n,
+    });
+
+    expect(store.lists.get("1")!.list_storage_location).toBeUndefined();
+  });
+
   it("UpdateListStorageLocation with offline LSL writes efp_offline_lists + offline slot", async () => {
     const store = new MemoryEFPStore();
     const URL = "https://example.com/efp/list/42.json";
@@ -300,6 +322,33 @@ describe("ListRecords handlers", () => {
     });
     expect(store.records.size).toBe(0);
     expect(store.tags.size).toBe(0);
+  });
+
+  it("normalizes junk-suffixed address records so normal removes still match", async () => {
+    const store = new MemoryEFPStore();
+    const addressRecord = "0101" + "cc".repeat(20);
+    const junkSuffixedAddOp = ("0x0101" + addressRecord + "deadbeef") as `0x${string}`;
+    const removeOp = ("0x0102" + addressRecord) as `0x${string}`;
+
+    await handleListOp(store, {
+      args: { slot: 1n, op: junkSuffixedAddOp },
+      chainId: 8453,
+      contractAddress: LIST_RECORDS_BASE,
+      blockTimestamp: TS,
+    });
+
+    const row = [...store.records.values()][0]!;
+    expect(row.record).toBe("0x" + addressRecord);
+    expect(row.record_data).toBe("0x" + "cc".repeat(20));
+
+    await handleListOp(store, {
+      args: { slot: 1n, op: removeOp },
+      chainId: 8453,
+      contractAddress: LIST_RECORDS_BASE,
+      blockTimestamp: TS + 1n,
+    });
+
+    expect(store.records.size).toBe(0);
   });
 
   it("ADD_TAG / REMOVE_TAG round-trips a UTF-8 tag", async () => {

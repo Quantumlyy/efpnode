@@ -18,6 +18,7 @@ import {
   parseListOp,
   parseRecord,
   parseTagOp,
+  parsedRecordToWireFormat,
   slotToBytes32,
 } from "../lib/parse-list-op.js";
 import {
@@ -67,12 +68,13 @@ export async function handleListOp(
     case EFP_OPCODE.ADD_RECORD: {
       const record = parseRecord(parsed.data);
       if (!record) return;
+      const recordWire = parsedRecordToWireFormat(record);
       await store.insertRecord({
-        id: listRecordId(chainId, contract, slot, parsed.data),
+        id: listRecordId(chainId, contract, slot, recordWire),
         chain_id: chainId,
         contract_address: contract,
         slot,
-        record: parsed.data,
+        record: recordWire,
         record_version: record.version,
         record_type: record.recordType,
         record_data: record.recordData,
@@ -81,11 +83,13 @@ export async function handleListOp(
       return;
     }
     case EFP_OPCODE.REMOVE_RECORD: {
+      const record = parseRecord(parsed.data);
+      if (!record) return;
       await store.deleteRecord({
         chain_id: chainId,
         contract_address: contract,
         slot,
-        record: parsed.data,
+        record: parsedRecordToWireFormat(record),
       });
       return;
     }

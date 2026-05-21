@@ -79,7 +79,9 @@ export async function handleUpdateListStorageLocation(
   let slot: Hex;
 
   if (parsed.kind === "onchain") {
-    chain_id = Number(parsed.chainId);
+    const parsedChainId = chainIdToNumber(parsed.chainId);
+    if (parsedChainId === null) return;
+    chain_id = parsedChainId;
     contract_address = parsed.contractAddress;
     slot = parsed.slot;
     // If the list previously had an offline LSL, clear that bookkeeping row;
@@ -137,4 +139,9 @@ export async function handleUpdateListStorageLocation(
       await store.setListManagerBySlot(lookup, address, ts);
     }
   }
+}
+
+function chainIdToNumber(chainId: bigint): number | null {
+  if (chainId > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(chainId);
 }

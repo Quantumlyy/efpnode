@@ -60,9 +60,11 @@ export function parseEfpListTextRecord(value: string): ParsedEfpListPointer | nu
   // an ENS text record set by a user is often hand-edited and may not be
   // checksummed; the regex above already restricts it to 40 hex chars.
   if (!isAddress(address!, { strict: false })) return null;
+  const parsedChainId = BigInt(chainId!);
+  if (parsedChainId > BigInt(Number.MAX_SAFE_INTEGER)) return null;
   return {
     listTokenId: tokenId!,
-    listChainId: Number(chainId),
+    listChainId: Number(parsedChainId),
     listContract: address!.toLowerCase() as Hex,
   };
 }

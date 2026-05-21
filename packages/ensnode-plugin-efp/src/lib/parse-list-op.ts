@@ -40,6 +40,12 @@ export interface ParsedRecord {
   recordData: Hex;
 }
 
+export function parsedRecordToWireFormat(record: ParsedRecord): Hex {
+  const versionHex = record.version.toString(16).padStart(2, "0");
+  const typeHex = record.recordType.toString(16).padStart(2, "0");
+  return ("0x" + versionHex + typeHex + record.recordData.slice(2)) as Hex;
+}
+
 export interface ParsedTagOp {
   /** Full record prefix `recordVersion | recordType | address`, 0x-prefixed (22 bytes). */
   record: Hex;

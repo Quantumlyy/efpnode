@@ -47,6 +47,12 @@ describe("parseEfpListTextRecord", () => {
     expect(parseEfpListTextRecord("0x1234")).toBeNull();
   });
 
+  it("returns null for CAIP-19 chain ids that cannot be represented safely", () => {
+    const value =
+      "eip155:9007199254740992/erc721:0x0E688f5DCa4a0a4729946ACbC44C792341714e08/1";
+    expect(parseEfpListTextRecord(value)).toBeNull();
+  });
+
   it("exposes the well-known key constant", () => {
     expect(DEFAULT_EFP_LIST_TEXT_RECORD_KEY).toBe("eth.efp.list");
   });

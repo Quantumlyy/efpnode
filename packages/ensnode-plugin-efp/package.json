@@ -13,10 +13,12 @@
     "./handlers/ListRegistry": "./src/handlers/ListRegistry.ts",
     "./handlers/AccountMetadata": "./src/handlers/AccountMetadata.ts",
     "./handlers/ListRecords": "./src/handlers/ListRecords.ts",
+    "./handlers/Resolver": "./src/handlers/Resolver.ts",
     "./handlers/ponder-store": "./src/handlers/ponder-store.ts",
     "./handlers/store": "./src/handlers/store.ts",
     "./lib/parse-list-op": "./src/lib/parse-list-op.ts",
     "./lib/parse-list-storage-location": "./src/lib/parse-list-storage-location.ts",
+    "./lib/parse-efp-list-text-record": "./src/lib/parse-efp-list-text-record.ts",
     "./lib/offline-slot": "./src/lib/offline-slot.ts",
     "./offline/payload": "./src/offline/payload.ts",
     "./offline/syncer": "./src/offline/syncer.ts"

@@ -234,7 +234,7 @@ describe("OfflineListSyncer", () => {
     // Tamper: install a different url_hash so the recompute mismatches.
     await store.upsertOfflineList({
       ...store.offlineLists.get("55537")!,
-      url_hash: "0x" + "ff".repeat(32),
+      url_hash: ("0x" + "ff".repeat(32)) as `0x${string}`,
     });
 
     const fetchImpl: typeof fetch = () => {

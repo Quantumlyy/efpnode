@@ -75,6 +75,12 @@ export {
   handleListOp,
   handleUpdateListMetadata,
 } from "./handlers/ListRecords.js";
+export { handleResolverTextChanged } from "./handlers/Resolver.js";
+export {
+  DEFAULT_EFP_LIST_TEXT_RECORD_KEY,
+  parseEfpListTextRecord,
+  type ParsedEfpListPointer,
+} from "./lib/parse-efp-list-text-record.js";
 export {
   createPonderEFPStore,
   type PonderStoreLikeDb,

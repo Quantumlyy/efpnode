@@ -90,7 +90,7 @@ describe("offlineRecordToWireFormat", () => {
       offlineRecordToWireFormat({
         version: 1,
         recordType: 1,
-        data: "0x" + "ab".repeat(20),
+        data: ("0x" + "ab".repeat(20)) as `0x${string}`,
         tags: [],
       }),
     ).toBe("0x0101" + "ab".repeat(20));
@@ -101,7 +101,7 @@ describe("offlineRecordToWireFormat", () => {
       offlineRecordToWireFormat({
         version: 2,
         recordType: 5,
-        data: "0xdeadbeef",
+        data: "0xdeadbeef" as `0x${string}`,
         tags: [],
       }),
     ).toBe("0x0205deadbeef");

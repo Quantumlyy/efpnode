@@ -81,3 +81,28 @@ export const ListRecordsABI = [
     ],
   },
 ] as const;
+
+/**
+ * Minimal ENS `Resolver` event-only ABI used by the EFP plugin to subscribe
+ * to text-record updates for the `eth.efp.list` cross-correlation. This is
+ * the standard ENS resolver `TextChanged(bytes32 indexed node, string
+ * indexed indexedKey, string key, string value)` shape — identical to the
+ * event in ENSNode's `ResolverABI` so the same handler dispatch works in
+ * both contexts.
+ *
+ * We do not pin a contract address: every contract that emits this event
+ * shape is fair game (matching how ENSNode's `subgraph` plugin watches all
+ * resolvers).
+ */
+export const ResolverABI = [
+  {
+    type: "event",
+    name: "TextChanged",
+    inputs: [
+      { indexed: true, name: "node", type: "bytes32" },
+      { indexed: true, name: "indexedKey", type: "string" },
+      { indexed: false, name: "key", type: "string" },
+      { indexed: false, name: "value", type: "string" },
+    ],
+  },
+] as const;

@@ -27,6 +27,7 @@ import {
   handleListOp,
   handleUpdateListMetadata,
 } from "../handlers/ListRecords.js";
+import { handleResolverTextChanged } from "../handlers/Resolver.js";
 import { createPonderEFPStore } from "../handlers/ponder-store.js";
 
 export default function attachEFPHandlers(): void {
@@ -103,6 +104,26 @@ export default function attachEFPHandlers(): void {
           slot: event.args.slot as bigint,
           key: event.args.key as string,
           value: event.args.value as Hex,
+        },
+        chainId: context.chain.id as number,
+        contractAddress: event.log.address as Hex,
+        blockTimestamp: event.block.timestamp as bigint,
+      });
+    },
+  );
+
+  // Resolver — chain 1 (Ethereum mainnet), pre-filtered by indexedKey
+  // (see ./plugin.ts) so we only see TextChanged events for eth.efp.list.
+  addOnchainEventListener(
+    namespaceContract(pluginName, "Resolver:TextChanged"),
+    async ({ context, event }: any) => {
+      await handleResolverTextChanged(createPonderEFPStore(context.ensDb), {
+        args: {
+          node: event.args.node as Hex,
+          // `indexedKey` carries the hashed string in topic1; the unhashed
+          // value is in `key`.
+          key: event.args.key as string,
+          value: event.args.value as string,
         },
         chainId: context.chain.id as number,
         contractAddress: event.log.address as Hex,

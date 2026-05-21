@@ -23,6 +23,7 @@ import type { Hex } from "viem";
 import {
   createPonderEFPStore,
   handleListOp,
+  handleResolverTextChanged,
   handleTransfer,
   handleUpdateAccountMetadata,
   handleUpdateListMetadata,
@@ -116,3 +117,20 @@ ponder.on(
     });
   },
 );
+
+// -----------------------------------------------------------------------------
+// Resolver (Ethereum mainnet, pre-filtered by indexedKey)
+// -----------------------------------------------------------------------------
+
+ponder.on("efp/Resolver:TextChanged", async ({ context, event }) => {
+  await handleResolverTextChanged(createPonderEFPStore(context.db as never), {
+    args: {
+      node: event.args.node as Hex,
+      key: event.args.key,
+      value: event.args.value,
+    },
+    chainId: context.chain!.id,
+    contractAddress: event.log.address as Hex,
+    blockTimestamp: event.block.timestamp,
+  });
+});

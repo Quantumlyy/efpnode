@@ -8,7 +8,12 @@
  * blocks directly.
  */
 
-export { ListRegistryABI, AccountMetadataABI, ListRecordsABI } from "./abis.js";
+export {
+  ListRegistryABI,
+  AccountMetadataABI,
+  ListRecordsABI,
+  ResolverABI,
+} from "./abis.js";
 export {
   EFP_PLUGIN_NAME,
   EFP_CONTRACTS,

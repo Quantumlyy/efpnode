@@ -39,8 +39,10 @@ import {
   AccountMetadataABI,
   ListRecordsABI,
   ListRegistryABI,
+  ResolverABI,
 } from "../abis.js";
 import { EFP_CONTRACTS, EFP_PLUGIN_NAME } from "../constants.js";
+import { DEFAULT_EFP_LIST_TEXT_RECORD_KEY } from "../lib/parse-efp-list-text-record.js";
 
 // In an ENSNode checkout, this resolves to PluginName.EFP after step (1).
 const pluginName = (PluginName as unknown as { EFP: typeof EFP_PLUGIN_NAME }).EFP;
@@ -106,6 +108,25 @@ export default createPlugin({
             },
           },
           abi: ListRecordsABI,
+        },
+        // Resolver: address-less event subscription on Ethereum mainnet,
+        // restricted by indexedKey hash to only TextChanged events whose
+        // key matches the well-known EFP key. This means we don't get a
+        // firehose of every text-record write; Ponder narrows the topic
+        // filter at the RPC level to one keccak256 value.
+        [namespaceContract(pluginName, "Resolver")]: {
+          chain: {
+            [chainKey(ethereum.chainId)]: {
+              // We don't pin `address` — match every contract that emits
+              // the standard TextChanged shape on chain 1.
+              startBlock: ethereum.startBlock,
+            },
+          },
+          abi: ResolverABI,
+          filter: {
+            event: "TextChanged",
+            args: { indexedKey: DEFAULT_EFP_LIST_TEXT_RECORD_KEY },
+          },
         },
       },
     });

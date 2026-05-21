@@ -36,3 +36,30 @@ export {
   LIST_STORAGE_LOCATION_LENGTH,
 } from "./lib/parse-list-storage-location.js";
 export * as efpSchema from "./schema.js";
+
+export {
+  handleTransfer,
+  handleUpdateListStorageLocation,
+} from "./handlers/ListRegistry.js";
+export { handleUpdateAccountMetadata } from "./handlers/AccountMetadata.js";
+export {
+  handleListOp,
+  handleUpdateListMetadata,
+} from "./handlers/ListRecords.js";
+export {
+  createPonderEFPStore,
+  type PonderStoreLikeDb,
+} from "./handlers/ponder-store.js";
+export {
+  type EFPStore,
+  type EFPListRow,
+  type EFPListRecordRow,
+  type EFPListRecordTagRow,
+  type EFPAccountMetadataRow,
+  type EFPPendingListMetadataRow,
+  type PendingListMetadataLookup,
+  listRecordId,
+  listRecordTagId,
+  accountMetadataId,
+  pendingListMetadataId,
+} from "./handlers/store.js";

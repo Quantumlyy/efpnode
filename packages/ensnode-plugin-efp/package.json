@@ -8,10 +8,13 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
-    "./plugin": "./src/plugin.ts",
-    "./event-handlers": "./src/event-handlers.ts",
     "./abis": "./src/abis.ts",
     "./constants": "./src/constants.ts",
+    "./handlers/ListRegistry": "./src/handlers/ListRegistry.ts",
+    "./handlers/AccountMetadata": "./src/handlers/AccountMetadata.ts",
+    "./handlers/ListRecords": "./src/handlers/ListRecords.ts",
+    "./handlers/ponder-store": "./src/handlers/ponder-store.ts",
+    "./handlers/store": "./src/handlers/store.ts",
     "./lib/parse-list-op": "./src/lib/parse-list-op.ts",
     "./lib/parse-list-storage-location": "./src/lib/parse-list-storage-location.ts"
   },
@@ -21,6 +24,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "drizzle-orm": ">=0.36.0 <0.50.0",
     "viem": "^2.50.3"
   },
   "peerDependencies": {

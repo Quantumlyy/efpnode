@@ -4,10 +4,16 @@
  * - `Transfer(from, to, tokenId)` mints/transfers a list NFT. The handler
  *   upserts the list row keyed by `tokenId` with the new owner.
  * - `UpdateListStorageLocation(tokenId, listStorageLocation)` (re-)points a
- *   list at the chain/contract/slot where its records live. The handler
- *   parses the 86-byte payload and writes the decoded fields onto the list
- *   row, then drains any pending list metadata that was staged while we did
- *   not yet know which list NFT this storage location belonged to.
+ *   list at its record store. The handler:
+ *     - parses the payload as either `locationType=1` (onchain) or
+ *       `locationType=2` (offline / HTTPS — see `parse-list-storage-location.ts`),
+ *     - writes the decoded fields onto the `efp_lists` row (using the
+ *       deterministic offline slot for `locationType=2`),
+ *     - inserts/refreshes a row in `efp_offline_lists` when the location is
+ *       offline, or deletes any pre-existing offline row if the location is
+ *       now onchain (a list that switched back),
+ *     - drains any pending list metadata that was staged before we knew
+ *       which list NFT owned this storage location.
  *
  * Both handlers are written as pure functions over an `EFPStore`. The
  * ENSIndexer-side `event-handlers.ts` (and the standalone Ponder example)
@@ -17,6 +23,11 @@
 
 import type { Hex } from "viem";
 
+import {
+  OFFLINE_CHAIN_ID,
+  OFFLINE_CONTRACT_ADDRESS,
+  offlineSlot,
+} from "../lib/offline-slot.js";
 import { parseListStorageLocation } from "../lib/parse-list-storage-location.js";
 import type { EFPStore, PendingListMetadataLookup } from "./store.js";
 
@@ -62,20 +73,57 @@ export async function handleUpdateListStorageLocation(
 
   const ts = new Date(Number(blockTimestamp) * 1000);
 
+  // Compute the (chain_id, contract, slot) tuple to write onto efp_lists.
+  let chain_id: number;
+  let contract_address: Hex;
+  let slot: Hex;
+
+  if (parsed.kind === "onchain") {
+    chain_id = Number(parsed.chainId);
+    contract_address = parsed.contractAddress;
+    slot = parsed.slot;
+    // If the list previously had an offline LSL, clear that bookkeeping row;
+    // the records under the offline slot remain (the syncer will not touch a
+    // list it no longer knows about, and the operator can decide whether to
+    // garbage-collect them).
+    await store.deleteOfflineList(args.tokenId.toString());
+  } else {
+    // locationType === 2 (offline)
+    chain_id = OFFLINE_CHAIN_ID;
+    contract_address = OFFLINE_CONTRACT_ADDRESS;
+    slot = offlineSlot(args.tokenId);
+
+    await store.upsertOfflineList({
+      token_id: args.tokenId.toString(),
+      url: parsed.url,
+      url_hash: parsed.urlHash,
+      chain_id_hint: parsed.chainId === 0n ? null : parsed.chainId.toString(),
+      // The syncer will pick it up immediately (next_sync_at = ts).
+      etag: null,
+      last_modified: null,
+      last_synced_at: null,
+      last_synced_status: null,
+      next_sync_at: ts,
+      consecutive_failures: 0,
+      created_at: ts,
+      updated_at: ts,
+    });
+  }
+
   await store.setListStorageLocation(args.tokenId.toString(), {
     list_storage_location: args.listStorageLocation,
-    list_storage_location_chain_id: Number(parsed.chainId),
-    list_storage_location_contract_address: parsed.contractAddress,
-    list_storage_location_slot: parsed.slot,
+    list_storage_location_chain_id: chain_id,
+    list_storage_location_contract_address: contract_address,
+    list_storage_location_slot: slot,
     updated_at: ts,
   });
 
   // Drain any pending list metadata that was staged for this exact
   // (chainId, contract, slot) tuple.
   const lookup: PendingListMetadataLookup = {
-    chain_id: Number(parsed.chainId),
-    contract_address: parsed.contractAddress,
-    slot: parsed.slot,
+    chain_id,
+    contract_address,
+    slot,
   };
   const pending = await store.drainPendingListMetadata(lookup);
 

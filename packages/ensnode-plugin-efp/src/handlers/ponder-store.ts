@@ -14,15 +14,19 @@
  * project supply the concrete type when they call `createPonderEFPStore`.
  */
 
-import { and, eq, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, or, type SQL } from "drizzle-orm";
 import type { Hex } from "viem";
 
 import {
   accountMetadataId,
+  ensListPointerId,
   type EFPAccountMetadataRow,
+  type EFPEnsListPointerRow,
   type EFPListRecordRow,
   type EFPListRecordTagRow,
   type EFPListRow,
+  type EFPOfflineListRow,
+  type EFPOfflineSyncUpdate,
   type EFPPendingListMetadataRow,
   type EFPStore,
   type PendingListMetadataLookup,
@@ -64,9 +68,7 @@ export interface PonderStoreLikeDb {
 /** Structural type for the Drizzle client exposed by Ponder at `ctxDb.sql`. */
 export interface PonderSqlClient {
   select(): {
-    from<T extends object>(table: T): {
-      where(condition: SQL<unknown>): Promise<unknown[]>;
-    };
+    from<T extends object>(table: T): PonderSelectQuery;
   };
   update<T extends object>(table: T): {
     set(row: object): {
@@ -76,6 +78,17 @@ export interface PonderSqlClient {
   delete<T extends object>(table: T): {
     where(condition: SQL<unknown>): Promise<{ rowCount?: number | null }>;
   };
+}
+
+/**
+ * Structural type for a fluent SELECT builder. We model it as a self-referential
+ * chain that always returns `Promise<unknown[]>` when awaited and supports
+ * `.where()`, `.orderBy()`, and `.limit()` in any order (matching drizzle).
+ */
+export interface PonderSelectQuery extends PromiseLike<unknown[]> {
+  where(condition: SQL<unknown>): PonderSelectQuery;
+  orderBy(...orderings: SQL<unknown>[]): PonderSelectQuery;
+  limit(n: number): PonderSelectQuery;
 }
 
 /**
@@ -246,6 +259,123 @@ export function createPonderEFPStore(db: PonderStoreLikeDb): EFPStore {
         );
 
       return rows.map((r) => ({ key: r.key, value: r.value }));
+    },
+
+    async upsertOfflineList(row: EFPOfflineListRow): Promise<void> {
+      await db
+        .insert(efpSchema.efp_offline_lists)
+        .values(row)
+        .onConflictDoUpdate({
+          url: row.url,
+          url_hash: row.url_hash,
+          chain_id_hint: row.chain_id_hint ?? null,
+          // Reset retry bookkeeping when the URL changes; the syncer can
+          // freshly fetch with no preconditions.
+          etag: null,
+          last_modified: null,
+          next_sync_at: row.next_sync_at,
+          consecutive_failures: 0,
+          updated_at: row.updated_at,
+        });
+    },
+
+    async deleteOfflineList(token_id: string): Promise<void> {
+      await db.delete(efpSchema.efp_offline_lists, { token_id });
+    },
+
+    async listDueOfflineLists(now: Date, limit: number): Promise<EFPOfflineListRow[]> {
+      const rows = (await db.sql
+        .select()
+        .from(efpSchema.efp_offline_lists)
+        .where(
+          or(
+            isNull(efpSchema.efp_offline_lists.next_sync_at),
+            lte(efpSchema.efp_offline_lists.next_sync_at, now),
+          )!,
+        )
+        .orderBy(asc(efpSchema.efp_offline_lists.next_sync_at))
+        .limit(limit)) as EFPOfflineListRow[];
+      return rows;
+    },
+
+    async updateOfflineSyncStatus(
+      token_id: string,
+      update: EFPOfflineSyncUpdate,
+    ): Promise<void> {
+      await db.update(efpSchema.efp_offline_lists, { token_id }).set({
+        etag: update.etag ?? null,
+        last_modified: update.last_modified ?? null,
+        last_synced_at: update.last_synced_at,
+        last_synced_status: update.last_synced_status,
+        next_sync_at: update.next_sync_at,
+        consecutive_failures: update.consecutive_failures,
+        updated_at: update.last_synced_at,
+      });
+    },
+
+    async reconcileOfflineRecords(input): Promise<void> {
+      const chain_id = input.chain_id;
+      const contract_address = input.contract_address.toLowerCase() as Hex;
+      const slot = input.slot.toLowerCase() as Hex;
+
+      // Delete-then-insert is intentional: a snapshot reconciliation is the
+      // simplest correct model for offline lists, where we don't see
+      // individual add/remove ops.
+      await db.sql
+        .delete(efpSchema.efp_list_records)
+        .where(
+          and(
+            eq(efpSchema.efp_list_records.chain_id, chain_id),
+            eq(efpSchema.efp_list_records.contract_address, contract_address),
+            eq(efpSchema.efp_list_records.slot, slot),
+          )!,
+        );
+      await db.sql
+        .delete(efpSchema.efp_list_record_tags)
+        .where(
+          and(
+            eq(efpSchema.efp_list_record_tags.chain_id, chain_id),
+            eq(efpSchema.efp_list_record_tags.contract_address, contract_address),
+            eq(efpSchema.efp_list_record_tags.slot, slot),
+          )!,
+        );
+
+      if (input.records.length > 0) {
+        await db
+          .insert(efpSchema.efp_list_records)
+          .values(input.records)
+          .onConflictDoNothing();
+      }
+      if (input.tags.length > 0) {
+        await db
+          .insert(efpSchema.efp_list_record_tags)
+          .values(input.tags)
+          .onConflictDoNothing();
+      }
+    },
+
+    async upsertEnsListPointer(row: EFPEnsListPointerRow): Promise<void> {
+      const id = ensListPointerId(row.chain_id, row.resolver, row.node, row.ens_key);
+      await db
+        .insert(efpSchema.efp_ens_list_pointers)
+        .values({ ...row, id })
+        .onConflictDoUpdate({
+          raw_value: row.raw_value,
+          list_token_id: row.list_token_id,
+          list_contract: row.list_contract,
+          list_chain_id: row.list_chain_id,
+          updated_at: row.updated_at,
+        });
+    },
+
+    async deleteEnsListPointer(input): Promise<void> {
+      const id = ensListPointerId(
+        input.chain_id,
+        input.resolver,
+        input.node,
+        input.ens_key,
+      );
+      await db.delete(efpSchema.efp_ens_list_pointers, { id });
     },
   };
 }

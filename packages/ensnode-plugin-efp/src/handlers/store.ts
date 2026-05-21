@@ -84,6 +84,44 @@ export interface PendingListMetadataLookup {
   slot: Hex;
 }
 
+export interface EFPOfflineListRow {
+  token_id: string;
+  url: string;
+  url_hash: Hex;
+  chain_id_hint?: string | null;
+  etag?: string | null;
+  last_modified?: string | null;
+  last_synced_at?: Date | null;
+  last_synced_status?: string | null;
+  next_sync_at?: Date | null;
+  consecutive_failures: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface EFPOfflineSyncUpdate {
+  etag?: string | null;
+  last_modified?: string | null;
+  last_synced_at: Date;
+  last_synced_status: string;
+  next_sync_at: Date;
+  consecutive_failures: number;
+}
+
+export interface EFPEnsListPointerRow {
+  id: string;
+  chain_id: number;
+  resolver: Hex;
+  node: Hex;
+  ens_key: string;
+  raw_value: string;
+  list_token_id: string;
+  list_contract: Hex;
+  list_chain_id: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
 /**
  * The narrow API the EFP handlers need from whichever store backs them.
  *
@@ -153,6 +191,57 @@ export interface EFPStore {
   drainPendingListMetadata(
     lookup: PendingListMetadataLookup,
   ): Promise<Array<Pick<EFPPendingListMetadataRow, "key" | "value">>>;
+
+  /**
+   * Insert/replace the offline-list bookkeeping row for a token. Called by the
+   * `UpdateListStorageLocation` handler when it decodes a `locationType=2`
+   * payload. The caller chooses sensible defaults for sync columns (e.g.
+   * `next_sync_at = now`, `consecutive_failures = 0`).
+   */
+  upsertOfflineList(row: EFPOfflineListRow): Promise<void>;
+
+  /** Remove the offline row for a token (e.g. when the LSL flips back to onchain). */
+  deleteOfflineList(token_id: string): Promise<void>;
+
+  /**
+   * Read the next batch of offline lists eligible for sync.
+   *
+   * - Returns rows where `next_sync_at <= now` (or `next_sync_at IS NULL`).
+   * - Ordered ascending by `next_sync_at` so the oldest pending list runs
+   *   first, with NULLs first.
+   * - Limited to `limit` rows per call.
+   */
+  listDueOfflineLists(now: Date, limit: number): Promise<EFPOfflineListRow[]>;
+
+  /** Persist the result of one sync attempt for `token_id`. */
+  updateOfflineSyncStatus(
+    token_id: string,
+    update: EFPOfflineSyncUpdate,
+  ): Promise<void>;
+
+  /**
+   * Atomically reconcile records & tags for an offline list:
+   * delete all existing rows at `(chain_id, contract_address, slot)` then
+   * insert the supplied rows. Used by the syncer to apply a full snapshot.
+   */
+  reconcileOfflineRecords(input: {
+    chain_id: number;
+    contract_address: Hex;
+    slot: Hex;
+    records: EFPListRecordRow[];
+    tags: EFPListRecordTagRow[];
+  }): Promise<void>;
+
+  /** Upsert an ENS → EFP-list cross-correlation pointer. */
+  upsertEnsListPointer(row: EFPEnsListPointerRow): Promise<void>;
+
+  /** Delete an ENS pointer (called when the text record is cleared). */
+  deleteEnsListPointer(input: {
+    chain_id: number;
+    resolver: Hex;
+    node: Hex;
+    ens_key: string;
+  }): Promise<void>;
 }
 
 /** Helpers for composite primary keys, kept here to keep handlers concise. */
@@ -186,6 +275,15 @@ export function pendingListMetadataId(
   key: string,
 ): string {
   return `${chain_id}-${contract_address.toLowerCase()}-${slot.toLowerCase()}-${key}`;
+}
+
+export function ensListPointerId(
+  chain_id: number,
+  resolver: Hex,
+  node: Hex,
+  ens_key: string,
+): string {
+  return `${chain_id}-${resolver.toLowerCase()}-${node.toLowerCase()}-${ens_key}`;
 }
 
 /**

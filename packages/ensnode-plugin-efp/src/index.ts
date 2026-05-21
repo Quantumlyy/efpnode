@@ -32,9 +32,21 @@ export {
 } from "./lib/parse-list-op.js";
 export {
   parseListStorageLocation,
-  type ParsedListStorageLocation,
+  computeOfflineUrlHash,
+  encodeOfflineListStorageLocation,
+  LOCATION_TYPE,
+  LIST_STORAGE_LOCATION_ONCHAIN_LENGTH,
+  LIST_STORAGE_LOCATION_OFFLINE_MIN_LENGTH,
   LIST_STORAGE_LOCATION_LENGTH,
+  type ParsedListStorageLocation,
+  type OnchainListStorageLocation,
+  type OfflineListStorageLocation,
 } from "./lib/parse-list-storage-location.js";
+export {
+  OFFLINE_CHAIN_ID,
+  OFFLINE_CONTRACT_ADDRESS,
+  offlineSlot,
+} from "./lib/offline-slot.js";
 export * as efpSchema from "./schema.js";
 
 export {
@@ -57,9 +69,13 @@ export {
   type EFPListRecordTagRow,
   type EFPAccountMetadataRow,
   type EFPPendingListMetadataRow,
+  type EFPOfflineListRow,
+  type EFPOfflineSyncUpdate,
+  type EFPEnsListPointerRow,
   type PendingListMetadataLookup,
   listRecordId,
   listRecordTagId,
   accountMetadataId,
   pendingListMetadataId,
+  ensListPointerId,
 } from "./handlers/store.js";

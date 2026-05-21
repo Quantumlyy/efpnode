@@ -4,6 +4,12 @@ import {
   handleTransfer,
   handleUpdateListStorageLocation,
 } from "../src/handlers/ListRegistry.js";
+import { encodeOfflineListStorageLocation } from "../src/lib/parse-list-storage-location.js";
+import {
+  OFFLINE_CHAIN_ID,
+  OFFLINE_CONTRACT_ADDRESS,
+  offlineSlot,
+} from "../src/lib/offline-slot.js";
 import { handleUpdateAccountMetadata } from "../src/handlers/AccountMetadata.js";
 import {
   handleListOp,
@@ -141,6 +147,102 @@ describe("ListRegistry handlers", () => {
     });
     const row = store.lists.get("1")!;
     expect(row.list_storage_location).toBeUndefined();
+  });
+
+  it("UpdateListStorageLocation with offline LSL writes efp_offline_lists + offline slot", async () => {
+    const store = new MemoryEFPStore();
+    const URL = "https://example.com/efp/list/42.json";
+    const offlineLsl = encodeOfflineListStorageLocation({ url: URL });
+
+    await handleTransfer(store, {
+      args: { from: ADDR("00"), to: ADDR("aa"), tokenId: 42n },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS,
+    });
+    await handleUpdateListStorageLocation(store, {
+      args: { tokenId: 42n, listStorageLocation: offlineLsl },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS + 1n,
+    });
+
+    const row = store.lists.get("42")!;
+    expect(row.list_storage_location).toBe(offlineLsl);
+    expect(row.list_storage_location_chain_id).toBe(OFFLINE_CHAIN_ID);
+    expect(row.list_storage_location_contract_address).toBe(OFFLINE_CONTRACT_ADDRESS);
+    expect(row.list_storage_location_slot).toBe(offlineSlot(42n));
+
+    expect(store.offlineLists.size).toBe(1);
+    const offline = store.offlineLists.get("42")!;
+    expect(offline.url).toBe(URL);
+    expect(offline.consecutive_failures).toBe(0);
+    expect(offline.next_sync_at?.getTime()).toBe(Number(TS + 1n) * 1000);
+  });
+
+  it("Flipping from offline back to onchain removes the offline row", async () => {
+    const store = new MemoryEFPStore();
+    const URL = "https://example.com/efp/list/77.json";
+    const slot = ("0x" + "ee".repeat(32)) as `0x${string}`;
+
+    await handleTransfer(store, {
+      args: { from: ADDR("00"), to: ADDR("11"), tokenId: 77n },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS,
+    });
+    // 1. offline first
+    await handleUpdateListStorageLocation(store, {
+      args: {
+        tokenId: 77n,
+        listStorageLocation: encodeOfflineListStorageLocation({ url: URL }),
+      },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS + 1n,
+    });
+    expect(store.offlineLists.size).toBe(1);
+
+    // 2. switch to onchain
+    await handleUpdateListStorageLocation(store, {
+      args: {
+        tokenId: 77n,
+        listStorageLocation: lslPayload(8453n, LIST_RECORDS_BASE, slot),
+      },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS + 2n,
+    });
+    expect(store.offlineLists.size).toBe(0);
+    expect(store.lists.get("77")!.list_storage_location_chain_id).toBe(8453);
+  });
+
+  it("Pending list metadata staged against the offline slot drains on offline LSL", async () => {
+    const store = new MemoryEFPStore();
+    const URL = "https://example.com/efp/list/99.json";
+
+    // Stage 'user' metadata against the offline slot BEFORE the list exists.
+    await store.upsertPendingListMetadata({
+      id: `${OFFLINE_CHAIN_ID}-${OFFLINE_CONTRACT_ADDRESS}-${offlineSlot(99n).toLowerCase()}-user`,
+      chain_id: OFFLINE_CHAIN_ID,
+      contract_address: OFFLINE_CONTRACT_ADDRESS,
+      slot: offlineSlot(99n),
+      key: "user",
+      value: ("0x" + ADDR("aa").slice(2)) as `0x${string}`,
+      created_at: new Date(),
+    });
+
+    await handleTransfer(store, {
+      args: { from: ADDR("00"), to: ADDR("bb"), tokenId: 99n },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS,
+    });
+    await handleUpdateListStorageLocation(store, {
+      args: {
+        tokenId: 99n,
+        listStorageLocation: encodeOfflineListStorageLocation({ url: URL }),
+      },
+      contractAddress: REGISTRY,
+      blockTimestamp: TS + 1n,
+    });
+
+    expect(store.lists.get("99")!.user).toBe(ADDR("aa"));
+    expect(store.pendingListMetadata.size).toBe(0);
   });
 });
 

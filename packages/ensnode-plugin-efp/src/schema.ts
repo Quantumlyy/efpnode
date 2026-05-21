@@ -204,3 +204,120 @@ export const efp_pending_list_metadata = onchainTable(
     slot_idx: index().on(table.chain_id, table.contract_address, table.slot),
   }),
 );
+
+/**
+ * `efp_offline_lists` — tracks lists whose `UpdateListStorageLocation`
+ * payload decoded to `locationType == 2` (HTTPS / offline).
+ *
+ * The corresponding list records live in `efp_list_records` under
+ *   `chain_id = 0`, `contract_address = 0x000…000`,
+ *   `slot = keccak256("efp-offline" || tokenId)`
+ *
+ * — see `src/lib/offline-slot.ts`. This row is the syncer's bookkeeping:
+ * which URL to fetch, how to fast-path with `If-None-Match` /
+ * `If-Modified-Since`, when to retry on failure, and how many failures we
+ * have seen in a row (drives exponential backoff).
+ */
+export const efp_offline_lists = onchainTable(
+  "efp_offline_lists",
+  (t) => ({
+    /** ERC-721 token id of the list NFT, decoded as a decimal string. */
+    token_id: t.text().primaryKey(),
+
+    /** URL to GET. Must use the `https://` scheme. */
+    url: t.text().notNull(),
+
+    /** `keccak256(utf8(url))` committed onchain. Re-verified on every fetch. */
+    url_hash: t.hex().notNull(),
+
+    /** Optional "primary chain hint" from the LSL payload, 0n if unset. */
+    chain_id_hint: t.text(),
+
+    /** Most recent `ETag` header from a successful fetch, if any. */
+    etag: t.text(),
+
+    /** Most recent `Last-Modified` header from a successful fetch, if any. */
+    last_modified: t.text(),
+
+    /** Wall-clock of the most recent sync attempt (success or failure). */
+    last_synced_at: t.timestamp(),
+
+    /** `ok` | `not_modified` | `error_<reason>` */
+    last_synced_status: t.text(),
+
+    /** Wall-clock of the earliest moment the syncer is allowed to try again. */
+    next_sync_at: t.timestamp(),
+
+    /** Number of consecutive failed syncs (drives exponential backoff). */
+    consecutive_failures: t.integer().notNull(),
+
+    /** Wall-clock when this offline row was first inserted. */
+    created_at: t.timestamp().notNull(),
+
+    /** Wall-clock of the most recent UpdateListStorageLocation event for this token. */
+    updated_at: t.timestamp().notNull(),
+  }),
+  (table) => ({
+    next_sync_idx: index().on(table.next_sync_at),
+  }),
+);
+
+/**
+ * `efp_ens_list_pointers` — cross-correlation between an ENS namehash and a
+ * specific EFP list NFT, populated from `Resolver.TextChanged` events whose
+ * indexed `key` matches the configured well-known key (default
+ * `eth.efp.list`).
+ *
+ * Composite key: `(chain_id, resolver, node, ens_key)`. The same node can in
+ * principle have pointers via multiple resolver chains (e.g. a wrapped name
+ * with a fallback resolver) so we don't collapse those at write time.
+ *
+ * When the resolved text record is empty (`""`), the row is deleted — that
+ * matches the ENS convention that an empty text record is equivalent to an
+ * unset record.
+ */
+export const efp_ens_list_pointers = onchainTable(
+  "efp_ens_list_pointers",
+  (t) => ({
+    /** Composite key "chainId-resolver-node-key". */
+    id: t.text().primaryKey(),
+
+    /** Chain id of the resolver contract that emitted the TextChanged event. */
+    chain_id: t.int8({ mode: "number" }).notNull(),
+
+    /** Resolver contract address. Lowercased. */
+    resolver: t.hex().notNull(),
+
+    /** ENS namehash of the name whose text record this is. */
+    node: t.hex().notNull(),
+
+    /** The ENS text-record key we matched on (e.g. "eth.efp.list"). */
+    ens_key: t.text().notNull(),
+
+    /**
+     * Raw text-record value as emitted. Kept verbatim so consumers can
+     * re-parse if our parser misinterpreted a future format.
+     */
+    raw_value: t.text().notNull(),
+
+    /** Decoded list token id (decimal string). */
+    list_token_id: t.text().notNull(),
+
+    /**
+     * Decoded list contract address (lowercased). For values that did not
+     * specify a contract (plain decimal token id), this is the default EFP
+     * ListRegistry on Base.
+     */
+    list_contract: t.hex().notNull(),
+
+    /** Decoded list chain id. Defaults to 8453 (Base) for plain decimal values. */
+    list_chain_id: t.int8({ mode: "number" }).notNull(),
+
+    created_at: t.timestamp().notNull(),
+    updated_at: t.timestamp().notNull(),
+  }),
+  (table) => ({
+    node_idx: index().on(table.node),
+    list_token_id_idx: index().on(table.list_token_id),
+  }),
+);

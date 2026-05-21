@@ -11,9 +11,12 @@ import type { Hex } from "viem";
 
 import type {
   EFPAccountMetadataRow,
+  EFPEnsListPointerRow,
   EFPListRecordRow,
   EFPListRecordTagRow,
   EFPListRow,
+  EFPOfflineListRow,
+  EFPOfflineSyncUpdate,
   EFPPendingListMetadataRow,
   EFPStore,
   PendingListMetadataLookup,
@@ -30,6 +33,8 @@ export class MemoryEFPStore implements EFPStore {
   tags = new Map<string, EFPListRecordTagRow>();
   accountMetadata = new Map<string, EFPAccountMetadataRow>();
   pendingListMetadata = new Map<string, EFPPendingListMetadataRow>();
+  offlineLists = new Map<string, EFPOfflineListRow>();
+  ensListPointers = new Map<string, EFPEnsListPointerRow>();
 
   async upsertList(row: EFPListRow): Promise<void> {
     const existing = this.lists.get(row.token_id);
@@ -189,5 +194,88 @@ export class MemoryEFPStore implements EFPStore {
       }
     }
     return drained;
+  }
+
+  async upsertOfflineList(row: EFPOfflineListRow): Promise<void> {
+    const existing = this.offlineLists.get(row.token_id);
+    this.offlineLists.set(row.token_id, {
+      ...row,
+      url_hash: lower(row.url_hash),
+      created_at: existing?.created_at ?? row.created_at,
+    });
+  }
+
+  async deleteOfflineList(token_id: string): Promise<void> {
+    this.offlineLists.delete(token_id);
+  }
+
+  async listDueOfflineLists(now: Date, limit: number): Promise<EFPOfflineListRow[]> {
+    const due = [...this.offlineLists.values()].filter((r) => {
+      if (!r.next_sync_at) return true;
+      return r.next_sync_at.getTime() <= now.getTime();
+    });
+    due.sort((a, b) => {
+      const at = a.next_sync_at?.getTime() ?? -Infinity;
+      const bt = b.next_sync_at?.getTime() ?? -Infinity;
+      return at - bt;
+    });
+    return due.slice(0, limit);
+  }
+
+  async updateOfflineSyncStatus(
+    token_id: string,
+    update: EFPOfflineSyncUpdate,
+  ): Promise<void> {
+    const existing = this.offlineLists.get(token_id);
+    if (!existing) return;
+    this.offlineLists.set(token_id, {
+      ...existing,
+      etag: update.etag ?? existing.etag,
+      last_modified: update.last_modified ?? existing.last_modified,
+      last_synced_at: update.last_synced_at,
+      last_synced_status: update.last_synced_status,
+      next_sync_at: update.next_sync_at,
+      consecutive_failures: update.consecutive_failures,
+      updated_at: update.last_synced_at,
+    });
+  }
+
+  async reconcileOfflineRecords(input: {
+    chain_id: number;
+    contract_address: Hex;
+    slot: Hex;
+    records: EFPListRecordRow[];
+    tags: EFPListRecordTagRow[];
+  }): Promise<void> {
+    const slotMatches = (r: { chain_id: number; contract_address: Hex; slot: Hex }) =>
+      r.chain_id === input.chain_id &&
+      lower(r.contract_address) === lower(input.contract_address) &&
+      lower(r.slot) === lower(input.slot);
+
+    for (const [id, r] of this.records) if (slotMatches(r)) this.records.delete(id);
+    for (const [id, t] of this.tags) if (slotMatches(t)) this.tags.delete(id);
+    for (const row of input.records) this.records.set(row.id, row);
+    for (const row of input.tags) this.tags.set(row.id, row);
+  }
+
+  async upsertEnsListPointer(row: EFPEnsListPointerRow): Promise<void> {
+    const existing = this.ensListPointers.get(row.id);
+    this.ensListPointers.set(row.id, {
+      ...row,
+      resolver: lower(row.resolver),
+      node: lower(row.node),
+      list_contract: lower(row.list_contract),
+      created_at: existing?.created_at ?? row.created_at,
+    });
+  }
+
+  async deleteEnsListPointer(input: {
+    chain_id: number;
+    resolver: Hex;
+    node: Hex;
+    ens_key: string;
+  }): Promise<void> {
+    const id = `${input.chain_id}-${lower(input.resolver)}-${lower(input.node)}-${input.ens_key}`;
+    this.ensListPointers.delete(id);
   }
 }

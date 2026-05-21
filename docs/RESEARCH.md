@@ -159,13 +159,152 @@ Operators who want a single process indexing ENS + EFP would:
 The drop-in files in `packages/ensnode-plugin-efp/src/` are deliberately
 import-symmetric with the existing plugins so step 2-5 are mechanical.
 
-## 5. Verifying the plugin without forking ENSNode
+## 5. Offline list storage location (`locationType = 2`)
 
-`examples/standalone-ponder/` provides a minimal Ponder app that consumes the
-plugin's ABIs, contract addresses, and event handlers directly. It uses a local
-in-memory PGlite database and the public RPC of each chain, which lets us run
-`ponder dev` against the live EFP contracts and confirm that:
+EFP's onchain List Storage Location currently only covers EVM-onchain
+backends (`locationType = 1`). The plugin extends the encoding with a second
+`locationType` so a list owner can publish their records at an HTTP(S) URL
+instead, and we index that URL on an interval. This reuses the existing
+`UpdateListStorageLocation` event shape so a list can switch between onchain
+and offline storage without any new contracts or events.
+
+### Wire format
+
+```
+listStorageLocation := version (1)            // == 0x01
+                     | locationType (1)       // == 0x02 (offline / HTTP)
+                     | chainId (32)           // big-endian uint256, == 0 for unbound
+                     | urlHash (32)           // keccak256(utf8(url)) — anchor for integrity
+                     | url (variable, UTF-8)  // tail
+```
+
+Reasoning:
+
+- The first four bytes still match `locationType == 1`'s prefix, so a
+  generic decoder can read `version` and `locationType` consistently before
+  dispatching.
+- `chainId == 0` declares the list as "chain-agnostic" — the records are
+  application-defined and aren't bound to any EVM chain id. A future
+  evolution could encode a "primary chain hint" here for analytics.
+- `urlHash` is a `keccak256(utf8(url))` digest committed onchain alongside
+  the URL bytes. The syncer uses it to detect tampering by an attacker who
+  controls a mid-path proxy or who deploys a different LSL than the one the
+  user signed for: if `keccak256(url_bytes_from_chain) != urlHash`, the
+  payload is rejected. This is cheap to verify and avoids a separate
+  signature scheme.
+- The URL is UTF-8 encoded and must use the `https://` scheme. The syncer
+  refuses `http://`, `data:`, `file:`, etc.
+
+### Response format
+
+The URL must respond with `Content-Type: application/json` and a body
+matching:
+
+```jsonc
+{
+  "version": 1,                              // payload schema version
+  "tokenId": "1234",                         // list NFT this payload claims
+  "records": [
+    {
+      "version": 1,                          // record encoding version
+      "recordType": 1,                       // 1 = address
+      "data": "0xae20540...",
+      "tags": ["close-friend"]               // optional
+    }
+  ],
+  "metadata": {
+    "user":    "0x...",                      // optional, overrides onchain
+    "manager": "0x..."                       // optional, overrides onchain
+  }
+}
+```
+
+The syncer reconciles `efp_list_records` and `efp_list_record_tags` for the
+list's deterministic offline slot
+`slot = keccak256("efp-offline" || tokenId-as-uint256)`, with
+`chain_id = 0` and `contract_address = 0x000…000`. This guarantees no clash
+with onchain slots, lets the same `efp_list_records` table store both, and
+means downstream readers join exactly as they do today
+(`(chain_id, contract_address, slot, record)`).
+
+### Sync schedule
+
+`efp_offline_lists` tracks one row per offline list with:
+
+- `token_id`, `url`, `url_hash`
+- `etag` (HTTP ETag from the last successful fetch — sent as `If-None-Match`)
+- `last_modified` (HTTP Last-Modified — sent as `If-Modified-Since`)
+- `last_synced_at`, `last_synced_status`
+  (`ok` / `not_modified` / `error_<reason>`)
+- `next_sync_at` (when the syncer is allowed to try again)
+- `consecutive_failures` (exponential backoff:
+  `delay = min(base * 2^n, max)`)
+
+The default cadence is every 10 minutes, with a 5-second per-list HTTP
+timeout, a 2 MiB max body, and exponential backoff from 10 s to 30 min on
+failure.
+
+### Why offline lives next to the event handlers, not inside them
+
+Ponder event handlers only run on EVM logs. Offline lists need:
+
+- a periodic timer independent of the chain head
+- outbound HTTP, which Ponder discourages from the indexing hot path
+- the ability to operate even when the chain is fully caught up
+
+The plugin therefore ships a standalone `OfflineListSyncer` class that
+takes an `EFPStore` and a `fetch` implementation. The standalone Ponder
+example runs it via `pnpm exec tsx scripts/offline-sync.ts`. In an
+ENSIndexer deployment, the syncer is intended to be wired up as a sidecar
+process by the operator — the ENSIndexer itself stays single-purpose.
+
+## 6. ENS text record cross-correlation
+
+When an ENS name's resolver sets a text record under the key
+`eth.efp.list`, that value points at the list NFT the owner wants
+associated with that ENS name. By indexing that text record we can answer
+"what list does `vitalik.eth` use?" without out-of-band joins.
+
+The plugin listens for `Resolver.TextChanged(node, indexedKey, key, value)`
+events filtered to `indexedKey == keccak256("eth.efp.list")`. Because
+`indexedKey` is an `indexed string` topic, viem / Ponder reduce the filter
+to a single topic match — we never receive `TextChanged` events for other
+keys.
+
+Accepted value formats:
+
+1. A decimal token id (`"1234"`) — interpreted as a list on the default EFP
+   `ListRegistry` (Base, chain id 8453).
+2. A CAIP-19 asset identifier
+   (`"eip155:8453/erc721:0x0E68…4e08/1234"`) — explicit chain id, contract
+   address, and token id. Lets future EFP registries (e.g. on other chains)
+   coexist without an ABI break.
+
+We store the parsed result in `efp_ens_list_pointers`:
+
+```
+(chain_id, resolver, node, ens_key, list_token_id, list_contract, list_chain_id)
+```
+
+with `node` being the ENS namehash so it joins directly against ENSNode's
+`subgraph_domain` / `domain` tables when the `subgraph` plugin is enabled.
+
+A pointer is upserted on each `TextChanged` event and deleted when the
+value is empty (`""`), matching the ENS convention that an empty text
+record is equivalent to an unset record.
+
+## 7. Verifying the plugin without forking ENSNode
+
+`examples/standalone-ponder/` provides a minimal Ponder app that consumes
+the plugin's ABIs, contract addresses, and event handlers directly. It
+uses a local in-memory PGlite database and the public RPC of each chain,
+which lets us run `ponder dev` against the live EFP contracts and confirm
+that:
 
 - The schema migrates cleanly.
 - Event handlers register for the expected `efp/<Contract>:<Event>` keys.
-- `parseListOp` and `parseListStorageLocation` agree with the api-v2 reference.
+- `parseListOp` and `parseListStorageLocation` agree with the api-v2
+  reference.
+- The offline syncer reconciles `efp_list_records` against a payload
+  served by a local mock HTTP server.
+- The ENS text record handler upserts `efp_ens_list_pointers` rows.

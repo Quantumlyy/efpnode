@@ -70,6 +70,15 @@ export interface PonderSqlClient {
   select(): {
     from<T extends object>(table: T): PonderSelectQuery;
   };
+  insert<T extends object>(table: T): {
+    values(row: object | object[]): {
+      onConflictDoUpdate(target: {
+        target: unknown;
+        set: object;
+      }): Promise<unknown>;
+      onConflictDoNothing(target?: { target: unknown }): Promise<unknown>;
+    };
+  };
   update<T extends object>(table: T): {
     set(row: object): {
       where(condition: SQL<unknown>): Promise<{ rowCount?: number | null }>;
@@ -98,14 +107,21 @@ export interface PonderSelectQuery extends PromiseLike<unknown[]> {
 export function createPonderEFPStore(db: PonderStoreLikeDb): EFPStore {
   return {
     async upsertList(row: EFPListRow): Promise<void> {
-      await db
+      // See `upsertPendingListMetadata` for why this uses the raw Drizzle
+      // escape hatch instead of `db.insert`. Multiple Transfers of the same
+      // token within one flush window would otherwise crash with
+      // `DelayedInsertError`.
+      await db.sql
         .insert(efpSchema.efp_lists)
         .values(row)
         .onConflictDoUpdate({
-          owner: row.owner,
-          nft_chain_id: row.nft_chain_id,
-          nft_contract_address: row.nft_contract_address,
-          updated_at: row.updated_at,
+          target: efpSchema.efp_lists.token_id,
+          set: {
+            owner: row.owner,
+            nft_chain_id: row.nft_chain_id,
+            nft_contract_address: row.nft_contract_address,
+            updated_at: row.updated_at,
+          },
         });
     },
 
@@ -193,12 +209,15 @@ export function createPonderEFPStore(db: PonderStoreLikeDb): EFPStore {
 
     async upsertAccountMetadata(row: EFPAccountMetadataRow): Promise<void> {
       const id = accountMetadataId(row.address, row.key);
-      await db
+      await db.sql
         .insert(efpSchema.efp_account_metadata)
         .values({ ...row, id })
         .onConflictDoUpdate({
-          value: row.value,
-          updated_at: row.updated_at,
+          target: efpSchema.efp_account_metadata.id,
+          set: {
+            value: row.value,
+            updated_at: row.updated_at,
+          },
         });
     },
 
@@ -211,12 +230,22 @@ export function createPonderEFPStore(db: PonderStoreLikeDb): EFPStore {
         row.slot,
         row.key,
       );
-      await db
+      // Bypass Ponder's batched insert path here. Ponder flushes pending
+      // inserts via Postgres `COPY`, which cannot resolve intra-batch PK
+      // collisions — so two `UpdateListMetadata` events for the same
+      // (chain, contract, slot, key) inside one flush window blow up with
+      // `DelayedInsertError`. The raw Drizzle `INSERT … ON CONFLICT … DO
+      // UPDATE` executes per-call, so each event lands atomically with
+      // last-write-wins semantics.
+      await db.sql
         .insert(efpSchema.efp_pending_list_metadata)
         .values({ ...row, id })
         .onConflictDoUpdate({
-          value: row.value,
-          created_at: row.created_at,
+          target: efpSchema.efp_pending_list_metadata.id,
+          set: {
+            value: row.value,
+            created_at: row.created_at,
+          },
         });
     },
 
@@ -262,20 +291,23 @@ export function createPonderEFPStore(db: PonderStoreLikeDb): EFPStore {
     },
 
     async upsertOfflineList(row: EFPOfflineListRow): Promise<void> {
-      await db
+      await db.sql
         .insert(efpSchema.efp_offline_lists)
         .values(row)
         .onConflictDoUpdate({
-          url: row.url,
-          url_hash: row.url_hash,
-          chain_id_hint: row.chain_id_hint ?? null,
-          // Reset retry bookkeeping when the URL changes; the syncer can
-          // freshly fetch with no preconditions.
-          etag: null,
-          last_modified: null,
-          next_sync_at: row.next_sync_at,
-          consecutive_failures: 0,
-          updated_at: row.updated_at,
+          target: efpSchema.efp_offline_lists.token_id,
+          set: {
+            url: row.url,
+            url_hash: row.url_hash,
+            chain_id_hint: row.chain_id_hint ?? null,
+            // Reset retry bookkeeping when the URL changes; the syncer can
+            // freshly fetch with no preconditions.
+            etag: null,
+            last_modified: null,
+            next_sync_at: row.next_sync_at,
+            consecutive_failures: 0,
+            updated_at: row.updated_at,
+          },
         });
     },
 
@@ -356,15 +388,18 @@ export function createPonderEFPStore(db: PonderStoreLikeDb): EFPStore {
 
     async upsertEnsListPointer(row: EFPEnsListPointerRow): Promise<void> {
       const id = ensListPointerId(row.chain_id, row.resolver, row.node, row.ens_key);
-      await db
+      await db.sql
         .insert(efpSchema.efp_ens_list_pointers)
         .values({ ...row, id })
         .onConflictDoUpdate({
-          raw_value: row.raw_value,
-          list_token_id: row.list_token_id,
-          list_contract: row.list_contract,
-          list_chain_id: row.list_chain_id,
-          updated_at: row.updated_at,
+          target: efpSchema.efp_ens_list_pointers.id,
+          set: {
+            raw_value: row.raw_value,
+            list_token_id: row.list_token_id,
+            list_contract: row.list_contract,
+            list_chain_id: row.list_chain_id,
+            updated_at: row.updated_at,
+          },
         });
     },
 

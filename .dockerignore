@@ -1,0 +1,17 @@
+**/node_modules
+**/.ponder
+**/dist
+**/coverage
+**/.turbo
+**/.next
+**/.opencode
+.git
+.github
+.gitignore
+.env
+.env.local
+**/*.log
+**/.DS_Store
+README.md
+LICENSE
+docs

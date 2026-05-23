@@ -30,7 +30,7 @@ import {
   ResolverABI,
 } from "@efpnode/ensnode-plugin-efp";
 
-const RPC_URL_1 = process.env.PONDER_RPC_URL_1 ?? "https://eth.llamarpc.com";
+const RPC_URL_1 = process.env.PONDER_RPC_URL_1 ?? "https://ethereum-rpc.publicnode.com";
 const RPC_URL_10 = process.env.PONDER_RPC_URL_10 ?? "https://mainnet.optimism.io";
 const RPC_URL_8453 = process.env.PONDER_RPC_URL_8453 ?? "https://mainnet.base.org";
 

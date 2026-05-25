@@ -44,8 +44,9 @@ COPY scripts/integrate-into-ensnode.sh /tmp/integrate.sh
 RUN bash /tmp/integrate.sh /app /tmp/efp-plugin/src
 
 # ----- install --------------------------------------------------------------
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+# Note: Railway's builder rejects unprefixed `--mount=type=cache` ids, and the
+# pnpm fetch cost on cold builds is acceptable here. Skip the cache mount.
+RUN pnpm install --frozen-lockfile
 
 # ----- runtime --------------------------------------------------------------
 WORKDIR /app/apps/ensindexer
